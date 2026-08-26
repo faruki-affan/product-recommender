@@ -1,0 +1,18 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+.pytest_cache/
+
+# Data and trained models
+data/
+models/*.npz
+models/*.pkl
+
+# Secrets and environment
+.env
+
+# OS and logs
+.DS_Store
+*.log
