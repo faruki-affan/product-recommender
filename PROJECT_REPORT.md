@@ -185,3 +185,43 @@ The offline training pipeline (`src/train.py`) outputs three core binary artifac
 * **Step 2: Start Web Service**: Run `python src/api/main.py` to launch the Uvicorn ASGI server locally on `[http://127.0.0.1:8000](http://127.0.0.1:8000)`.
 * **Step 3: Interactive Verification**: Navigate to `[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)` to test endpoints and validate payloads via the interactive Swagger UI interface.
 
+## Phase 6: PostgreSQL Schema Design, Indexing, & Metadata Hydration
+
+This phase establishes the relational catalog storage layer, streaming unstructured JSON metadata from the Amazon Video Games dataset directly into PostgreSQL, and hydrating the machine learning recommendation pipeline with rich product details.
+
+### What Was Built
+
+* **Database Schema Design**: Created a structured `products` table in PostgreSQL using `JSONB` for flexible category handling and explicit column mappings for identifiers, titles, pricing, brand names, and image URLs.
+* **Streaming ETL Loader (`src/db/load_metadata.py`)**: Built a robust, memory-efficient ingestion script that streams and unzips compressed `.json.gz` catalog archives, normalizes unstructured attributes, and batch-inserts records into PostgreSQL using `psycopg2.extras.execute_batch` with upsert support.
+* **API Metadata Hydration (`src/api/main.py`)**: Integrated asynchronous database connection pooling via `asyncpg` directly into the FastAPI application lifespan, enabling `/recommend` and `/similar` endpoints to map raw recommendation ASIN arrays to live catalog fields dynamically.
+
+### Key Components & Architecture
+
+* **Database Table (`products`)**:
+* `asin` (TEXT, Primary Key)
+* `title` (TEXT)
+* `price` (DOUBLE PRECISION)
+* `im_url` (TEXT)
+* `brand` (TEXT)
+* `categories` (JSONB)
+* `description` (TEXT)
+
+
+* **Hydration Workflow**: ML model inference returns top-K ranked `asin` scores, which are subsequently queried against the PostgreSQL catalog in a single batch query (`WHERE asin = ANY($1::text[])`) to return complete product attributes to clients.
+
+
+## Phase 7: FastAPI Serving Layer, Schemas, & Dependency Injection
+
+This phase refactors the application's serving layer to adopt professional software engineering patterns, separating concerns into dedicated modules, explicit Pydantic schemas, and FastAPI's dependency injection system.
+
+### What Was Built
+
+* **Modular Pydantic Schemas (`src/api/schemas.py`)**: Extracted data validation and response contracts into dedicated models (`ProductRecommendation`), ensuring strict typing for product identifiers, scores, prices, titles, image URLs, and brands.
+* **Dependency Injection (`src/api/deps.py`)**: Implemented a reusable asynchronous database dependency (`get_db_pool()`) to supply the active `asyncpg` connection pool via FastAPI's native `Depends` system, removing reliance on global application state inside path operations.
+* **Refactored Path Operations (`src/api/main.py`)**: Cleaned up route handlers to leverage injected database connections and strictly enforce response models, resulting in an easily testable and maintainable architecture.
+
+### Key Components & Architecture
+
+* **Schemas (`ProductRecommendation`)**: Enforces explicit data structures for all outgoing recommendation and similarity payloads.
+* **Dependency Injection (`get_db_pool`)**: Standardizes how HTTP endpoints request database access resources.
+* **Clean Routing**: Separates business logic and data mapping from global setup configurations.

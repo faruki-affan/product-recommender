@@ -1,19 +1,27 @@
 """FastAPI service that serves ALS product recommendations from saved artifacts."""
 
+import os
 import pickle
+from contextlib import asynccontextmanager
 from pathlib import Path
 
+import asyncpg
 import implicit  # noqa: F401
 import numpy as np
 import scipy.sparse
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from implicit.cpu.als import AlternatingLeastSquares
+
+from src.api.deps import get_db_pool
+from src.api.schemas import ProductRecommendation
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 ARTIFACTS_DIR = ROOT / "artifacts"
-
-app = FastAPI()
+DEFAULT_DATABASE_URL = "postgresql://postgres:9710@localhost:5432/recommender_db"
+METADATA_QUERY = (
+    "SELECT asin, title, price, im_url, brand FROM products WHERE asin = ANY($1::text[])"
+)
 
 model = None
 user_item_matrix = None
@@ -23,7 +31,10 @@ user_id_to_idx = None
 product_id_to_idx = None
 
 
-@app.on_event("startup")
+def database_url() -> str:
+    return os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or DEFAULT_DATABASE_URL
+
+
 def load_artifacts() -> None:
     global model, user_item_matrix, user_lookup, product_lookup
     global user_id_to_idx, product_id_to_idx
@@ -38,8 +49,47 @@ def load_artifacts() -> None:
     product_id_to_idx = {str(product_id): idx for idx, product_id in enumerate(product_lookup)}
 
 
-@app.get("/recommend/{user_id}")
-def recommend(user_id: int, k: int = 10):
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    load_artifacts()
+    app.state.pool = await asyncpg.create_pool(database_url())
+    yield
+    await app.state.pool.close()
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+async def hydrate_recommendations(
+    pool: asyncpg.Pool,
+    items: list[tuple[str, float]],
+) -> list[ProductRecommendation]:
+    asins = [asin for asin, _ in items]
+    rows = await pool.fetch(METADATA_QUERY, asins)
+    by_asin = {row["asin"]: row for row in rows}
+
+    hydrated = []
+    for asin, score in items:
+        meta = by_asin.get(asin)
+        hydrated.append(
+            ProductRecommendation(
+                product_id=asin,
+                score=score,
+                title=meta["title"] if meta else None,
+                price=float(meta["price"]) if meta and meta["price"] is not None else None,
+                im_url=meta["im_url"] if meta else None,
+                brand=meta["brand"] if meta else None,
+            )
+        )
+    return hydrated
+
+
+@app.get("/recommend/{user_id}", response_model=list[ProductRecommendation])
+async def recommend(
+    user_id: int,
+    k: int = 10,
+    pool: asyncpg.Pool = Depends(get_db_pool),
+):
     if 0 <= user_id < len(user_lookup):
         user_idx = user_id
     elif user_id in user_id_to_idx:
@@ -54,37 +104,34 @@ def recommend(user_id: int, k: int = 10):
         filter_already_liked_items=True,
     )
 
-    return [
-        {
-            "product_id": str(product_lookup[int(item_idx)]),
-            "score": float(score),
-        }
+    ranked = [
+        (str(product_lookup[int(item_idx)]), float(score))
         for item_idx, score in zip(np.asarray(item_ids), np.asarray(scores))
     ]
+    return await hydrate_recommendations(pool, ranked)
 
 
-@app.get("/similar/{product_id}")
-def similar(product_id: str, k: int = 10):
+@app.get("/similar/{product_id}", response_model=list[ProductRecommendation])
+async def similar(
+    product_id: str,
+    k: int = 10,
+    pool: asyncpg.Pool = Depends(get_db_pool),
+):
     if product_id not in product_id_to_idx:
         raise HTTPException(status_code=404, detail=f"product_id {product_id} not found")
 
     item_idx = product_id_to_idx[product_id]
     similar_ids, scores = model.similar_items(itemid=item_idx, N=k + 1)
 
-    results = []
+    ranked = []
     for similar_idx, score in zip(np.asarray(similar_ids), np.asarray(scores)):
         similar_idx = int(similar_idx)
         if similar_idx == item_idx:
             continue
-        results.append(
-            {
-                "product_id": str(product_lookup[similar_idx]),
-                "score": float(score),
-            }
-        )
-        if len(results) >= k:
+        ranked.append((str(product_lookup[similar_idx]), float(score)))
+        if len(ranked) >= k:
             break
-    return results
+    return await hydrate_recommendations(pool, ranked)
 
 
 if __name__ == "__main__":
