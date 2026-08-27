@@ -335,3 +335,30 @@ product-recommender/
 ├── requirements.txt        # UTF-8 encoded Python dependency manifest
 ├── src/                    # FastAPI application source code
 └── artifacts/              # Trained machine learning model weights
+
+```
+
+## Phase 12: Continuous Integration and Automated Testing Pipeline
+
+Phase 12 establishes a robust Continuous Integration (CI) pipeline utilizing GitHub Actions to automate system validation, ensuring that no broken code or faulty container configurations merge into the production branch.
+
+**Architectural Configuration**
+The CI pipeline triggers automatically on every `push` and `pull_request` to the `main` branch. To accurately simulate the production environment during integration testing, the workflow provisions ephemeral service containers directly within the Ubuntu GitHub runner before executing application code.
+
+* **Database Service:** PostgreSQL 16 Alpine container equipped with automated health checks (`pg_isready`) and strict timeout intervals.
+* **Cache Service:** Redis 7 Alpine container validated via `redis-cli ping` to ensure immediate availability.
+* **Test Runner:** Python 3.12 environment configured with `pip` dependency caching to drastically reduce execution latency.
+
+**Pipeline Workflow Details**
+
+| Execution Phase | Action Performed | Validation Purpose |
+| :--- | :--- | :--- |
+| **Environment Setup** | Installs OS-level libraries (`libgomp1`, `libpq5`) and Python requirements via a UTF-8 encoded manifest. | Ensures the exact dependency tree required by the machine learning models and FastAPI framework is present. |
+| **Integration Testing** | Executes the `pytest` suite against the active PostgreSQL and Redis service containers. | Verifies database interactions, API endpoint logic, and cache retrieval workflows under real conditions. |
+| **Container Verification** | Executes `docker build -t product-recommender-api:test .` | Validates the integrity of the `Dockerfile` and guarantees the application can be successfully containerized. |
+
+**System Impact and Results**
+Implementing this automated CI architecture resolved critical operational bottlenecks and secured the deployment lifecycle:
+* **Regression Prevention:** The pipeline successfully intercepted a missing `httpx` testing dependency during its maiden run, blocking a failing build from contaminating the main branch until a patch was applied.
+* **Environment Parity:** Executing tests against actual PostgreSQL and Redis instances guarantees the API logic functions correctly under real database constraints, eliminating the unreliability of mocked data.
+* **Deployment Readiness:** By compiling the Docker image on every push, the repository maintains continuous deployment readiness, bridging the gap between local development and live cloud deployment.
