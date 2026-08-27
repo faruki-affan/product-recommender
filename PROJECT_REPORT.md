@@ -229,22 +229,6 @@ This phase refactors the application's serving layer to adopt professional softw
 
 ## Phase 8: Redis In-Memory Caching & Cache Invalidation Strategy
 
-This phase adds a Redis-backed response cache in front of ALS inference and PostgreSQL metadata hydration so repeated `/recommend` and `/similar` requests can return immediately without recomputing rankings.
-
-### What Was Built
-
-* **Redis Connection Lifecycle (`src/api/main.py`)**: Opened a `redis.asyncio` client to `localhost:6379` during FastAPI lifespan startup and closed the connection pool on shutdown, with the client injected via `get_redis()`.
-* **Endpoint Caching**: `/recommend/{user_id}` and `/similar/{product_id}` look up `rec:{user_id}:{k}` and `sim:{product_id}:{k}` before model inference or catalog queries. Cache hits deserialize the stored JSON payload; misses compute as usual, persist the hydrated response with a 300-second TTL, then return it.
-* **Invalidation (`src/cache/client.py`)**: Added scan-and-delete helpers for `rec:*` and `sim:*`. The metadata loader (`src/db/load_metadata.py`) clears those keys after a catalog upsert so stale titles, prices, and brands are not served.
-
-### Key Components & Architecture
-
-* **Cache keys**: `rec:{user_id}:{k}` for personalized recommendations and `sim:{product_id}:{k}` for item neighbors, scoped by requested `k`.
-* **TTL**: 300 seconds, matching the expected freshness window for catalog-backed recommendation payloads.
-* **Invalidation trigger**: metadata reload, which rewrites product attributes used during hydration.
-
-## Phase 8: Redis In-Memory Caching & Cache Invalidation Strategy
-
 This phase integrates an asynchronous Redis in-memory caching layer into the FastAPI application to dramatically reduce response times for frequent recommendation and similarity queries.
 
 ### What Was Built
