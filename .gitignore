@@ -10,6 +10,10 @@ data/
 models/*.npz
 models/*.pkl
 
+# Trained artifacts (keep the folder, ignore binaries)
+artifacts/*
+!artifacts/.gitkeep
+
 # Secrets and environment
 .env
 
