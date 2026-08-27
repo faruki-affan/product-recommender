@@ -4,6 +4,8 @@
 # Python cache
 __pycache__/
 .pytest_cache/
+.coverage
+htmlcov/
 
 # Data and trained models
 data/

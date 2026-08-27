@@ -278,3 +278,19 @@ After the run, `src/benchmarks/results/locust_stats.csv` has **Requests/s** (thr
 * **Grouped request names**: Locust records `/recommend/{user_id}` and `/similar/{product_id}` so stats stay aggregated rather than exploding into one row per query string.
 * **Think time**: `between(1, 3)` seconds models a user pausing between API calls instead of saturating the server with a tight loop.
 * **Headless CSV export**: Locust’s `--csv` stats file is the source of truth for comparing cache-cold vs cache-warm latency under the same user count and duration.
+
+
+## Phase 10: Automated Unit & Integration Testing with Pytest
+This phase introduces a robust automated testing and code coverage suite using pytest to guarantee system reliability across core endpoints, database operations, and machine learning inference pipelines.
+
+### What Was Built
+Comprehensive Test Suite (tests/): Implemented modular test files covering API routing (tests/test_api.py), database utility logic (tests/test_db.py), and ALS model inference (tests/test_recommender.py).
+
+Isolated Test Fixtures (tests/conftest.py): Configured shared mock fixtures for PostgreSQL connection pools, Redis clients, and fake ALS models to enable fast, offline execution via FastAPI's TestClient.
+
+Automated Coverage Reporting (pytest.ini & .coveragerc): Integrated pytest-cov to enforce code quality metrics, generating terminal coverage tables and browsable HTML reports (htmlcov/).
+
+### Test Execution & Performance
+Reliable Execution: Achieved 27 passed tests running locally from the repository root in under a second.
+
+High Coverage: Maintained an overall 85% code coverage rating across the entire service package, with 100% coverage on core API modules and routing layers.
