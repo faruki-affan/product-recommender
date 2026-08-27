@@ -12,9 +12,11 @@ import scipy.sparse
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
 from implicit.cpu.als import AlternatingLeastSquares
+from redis.asyncio import Redis
 
-from src.api.deps import get_db_pool
+from src.api.deps import get_db_pool, get_redis
 from src.api.schemas import ProductRecommendation
+from src.cache.client import get_cached_json, rec_key, redis_url, set_cached_json, sim_key
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 ARTIFACTS_DIR = ROOT / "artifacts"
@@ -53,7 +55,9 @@ def load_artifacts() -> None:
 async def lifespan(app: FastAPI):
     load_artifacts()
     app.state.pool = await asyncpg.create_pool(database_url())
+    app.state.redis = Redis.from_url(redis_url(), decode_responses=True)
     yield
+    await app.state.redis.aclose()
     await app.state.pool.close()
 
 
@@ -89,7 +93,13 @@ async def recommend(
     user_id: int,
     k: int = 10,
     pool: asyncpg.Pool = Depends(get_db_pool),
+    redis_client: Redis = Depends(get_redis),
 ):
+    cache_key = rec_key(user_id, k)
+    cached = await get_cached_json(redis_client, cache_key)
+    if cached is not None:
+        return cached
+
     if 0 <= user_id < len(user_lookup):
         user_idx = user_id
     elif user_id in user_id_to_idx:
@@ -108,7 +118,9 @@ async def recommend(
         (str(product_lookup[int(item_idx)]), float(score))
         for item_idx, score in zip(np.asarray(item_ids), np.asarray(scores))
     ]
-    return await hydrate_recommendations(pool, ranked)
+    hydrated = await hydrate_recommendations(pool, ranked)
+    await set_cached_json(redis_client, cache_key, [item.model_dump() for item in hydrated])
+    return hydrated
 
 
 @app.get("/similar/{product_id}", response_model=list[ProductRecommendation])
@@ -116,7 +128,13 @@ async def similar(
     product_id: str,
     k: int = 10,
     pool: asyncpg.Pool = Depends(get_db_pool),
+    redis_client: Redis = Depends(get_redis),
 ):
+    cache_key = sim_key(product_id, k)
+    cached = await get_cached_json(redis_client, cache_key)
+    if cached is not None:
+        return cached
+
     if product_id not in product_id_to_idx:
         raise HTTPException(status_code=404, detail=f"product_id {product_id} not found")
 
@@ -131,7 +149,9 @@ async def similar(
         ranked.append((str(product_lookup[similar_idx]), float(score)))
         if len(ranked) >= k:
             break
-    return await hydrate_recommendations(pool, ranked)
+    hydrated = await hydrate_recommendations(pool, ranked)
+    await set_cached_json(redis_client, cache_key, [item.model_dump() for item in hydrated])
+    return hydrated
 
 
 if __name__ == "__main__":

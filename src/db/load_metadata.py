@@ -14,6 +14,8 @@ import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import Json, execute_batch
 
+from src.cache.client import invalidate_recommendation_cache_sync
+
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -163,6 +165,11 @@ def main() -> None:
     with psycopg2.connect(database_url()) as conn:
         count = load_metadata(path, conn)
     print(f"Inserted/updated {count} products")
+    try:
+        deleted = invalidate_recommendation_cache_sync()
+        print(f"Invalidated {deleted} recommendation cache keys")
+    except Exception as exc:
+        print(f"Warning: cache invalidation failed: {exc}")
 
 
 if __name__ == "__main__":

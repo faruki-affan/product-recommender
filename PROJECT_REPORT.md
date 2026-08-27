@@ -225,3 +225,36 @@ This phase refactors the application's serving layer to adopt professional softw
 * **Schemas (`ProductRecommendation`)**: Enforces explicit data structures for all outgoing recommendation and similarity payloads.
 * **Dependency Injection (`get_db_pool`)**: Standardizes how HTTP endpoints request database access resources.
 * **Clean Routing**: Separates business logic and data mapping from global setup configurations.
+
+
+## Phase 8: Redis In-Memory Caching & Cache Invalidation Strategy
+
+This phase adds a Redis-backed response cache in front of ALS inference and PostgreSQL metadata hydration so repeated `/recommend` and `/similar` requests can return immediately without recomputing rankings.
+
+### What Was Built
+
+* **Redis Connection Lifecycle (`src/api/main.py`)**: Opened a `redis.asyncio` client to `localhost:6379` during FastAPI lifespan startup and closed the connection pool on shutdown, with the client injected via `get_redis()`.
+* **Endpoint Caching**: `/recommend/{user_id}` and `/similar/{product_id}` look up `rec:{user_id}:{k}` and `sim:{product_id}:{k}` before model inference or catalog queries. Cache hits deserialize the stored JSON payload; misses compute as usual, persist the hydrated response with a 300-second TTL, then return it.
+* **Invalidation (`src/cache/client.py`)**: Added scan-and-delete helpers for `rec:*` and `sim:*`. The metadata loader (`src/db/load_metadata.py`) clears those keys after a catalog upsert so stale titles, prices, and brands are not served.
+
+### Key Components & Architecture
+
+* **Cache keys**: `rec:{user_id}:{k}` for personalized recommendations and `sim:{product_id}:{k}` for item neighbors, scoped by requested `k`.
+* **TTL**: 300 seconds, matching the expected freshness window for catalog-backed recommendation payloads.
+* **Invalidation trigger**: metadata reload, which rewrites product attributes used during hydration.
+
+## Phase 8: Redis In-Memory Caching & Cache Invalidation Strategy
+
+This phase integrates an asynchronous Redis in-memory caching layer into the FastAPI application to dramatically reduce response times for frequent recommendation and similarity queries.
+
+### What Was Built
+
+* **Asynchronous Redis Client (`src/cache/client.py`)**: Configured a high-performance connection pool targeting `localhost:6379`, integrated natively into FastAPI's application lifespan events (`startup` and `shutdown`).
+* **Endpoint-Level Caching**: Wrapped `/recommend/{user_id}` and `/similar/{product_id}` endpoints to check for cached JSON payloads prior to running model inference or PostgreSQL lookups. Payloads are cached with a **300-second TTL** using structured keys (`rec:{user_id}:{k}` and `sim:{product_id}:{k}`).
+* **Cache Invalidation Strategy (`src/db/load_metadata.py`)**: Implemented pattern-based cache clearing (`rec:*` and `sim:*`) triggered immediately following metadata reloads and catalog updates, ensuring clients never receive stale pricing or missing product attributes.
+
+### Key Components & Architecture
+
+* **Cache Keys**: Standardized naming conventions mapping user and item parameters directly to memory keys.
+* **Fail-Safe Operation**: Designed the caching layer to log connection warnings and seamlessly bypass Redis if the service is temporarily unavailable, maintaining high API availability.
+* **Invalidation Hook**: Automatically purges relevant cache patterns during ETL catalog updates to maintain data consistency.
