@@ -138,3 +138,50 @@ In traditional Machine Learning classifications, 4.5% accuracy is failing. In Re
 * **The Performance Gain:** The iALS model achieves **4.5%**, performing roughly **80 times better** than random chance.
 * **Strict Penalties:** Offline evaluation is extremely strict. If the model recommends 10 highly relevant, personalized games that the user would love, but misses the *one* specific game the user actually bought next, the model scores a 0. Therefore, a 4.5% exact Hit Rate proves the model has successfully built a robust, personalized latent space.
 
+
+# Phase 5: Production Architecture, Decoupling, & Web Serving
+
+## Architectural Overview
+
+Phase 5 transitions the system from standalone experimental scripts (`experiments/`) into a decoupled, production-grade Machine Learning microservice. The offline batch job (`src/train.py`) processes raw Amazon 5-core JSON data to serialize three deterministic artifacts: `als_model.npz` (factor weights), `user_item_matrix.npz` (sparse CSR matrix), and `lookups.pkl` (bi-directional ID maps). Upon startup, the FastAPI online engine (`src/api/main.py`) loads these pre-computed artifacts directly into RAM, enabling real-time serving via `GET /recommend/{user_id}` (personalized dot-product ranking) and `GET /similar/{product_id}` (latent cosine item neighbors).
+
+## 1. System Decoupling Rationale
+
+In real-time production systems, offline training and online serving remain strictly decoupled to guarantee low-latency inference and high availability:
+
+* **Separation of Compute Loads**: Processing 500k+ interactions requires intensive CPU and memory allocation over multi-second or multi-minute execution windows, whereas online recommendation serving must complete within single-digit milliseconds (< 15 ms).
+* **Zero-Downtime Serving**: The web server never directly interacts with or processes the raw dataset; it loads pre-calculated mathematical factors into memory at startup and handles incoming HTTP traffic concurrently.
+* **Idempotent Artifacts**: The training process produces deterministic binary artifacts saved to `artifacts/`, allowing the production API to consume them strictly in read-only mode.
+
+## 2. Artifact Schema & Persistence
+
+The offline training pipeline (`src/train.py`) outputs three core binary artifacts:
+
+* `als_model.npz` (NumPy Compressed Archive, ~5–10 MB): Stores the learned user factor matrix $X \in \mathbb{R}^{M \times f}$ and item factor matrix $Y \in \mathbb{R}^{N \times f}$ ($f=64$ latent factors).
+* `user_item_matrix.npz` (SciPy Sparse CSR, ~2–4 MB): Preserves historical user-item interactions to filter out already-consumed products dynamically during inference via `filter_already_liked_items=True`.
+* `lookups.pkl` (Pickle Dictionary, ~1–2 MB): Stores raw Amazon ASIN and User ID lookup arrays inverted into $O(1)$ mapping dictionaries (`user_id_to_idx` and `product_id_to_idx`).
+
+## 3. API Endpoints & Mathematical Mechanics
+
+### 1. Personalized User Recommendations
+
+* **Route**: `GET /recommend/{user_id}?k=10`
+* **Status Codes**: `200 OK`, `404 Not Found` (Unknown User), `422 Validation Error` (Malformed input parameters)
+* **Mechanics**: Computes the dot product between the target user factor vector $u_i$ and candidate item vectors $v_j$: $\text{score}_{ij} = u_i \cdot v_j^T$. The top $k$ items by score are ranked and returned after filtering historical interactions.
+* **Sample Request**: `curl -X GET "[http://127.0.0.1:8000/recommend/0?k=3](http://127.0.0.1:8000/recommend/0?k=3)"`
+* **Sample Response**: `[{"product_id": "B0053BCML6", "score": 0.2095499038696289}, {"product_id": "B000ZKA0J6", "score": 0.16577526926994324}, {"product_id": "B000FQ2DTA", "score": 0.12512291967868805}]`
+
+### 2. Item-to-Item Similarities (Related Products)
+
+* **Route**: `GET /similar/{product_id}?k=10`
+* **Status Codes**: `200 OK`, `404 Not Found` (Unknown Product ID)
+* **Mechanics**: Computes the cosine similarity across latent item vectors: $\text{Cosine Similarity}(v_a, v_b) = \frac{v_a \cdot v_b}{\Vert{}v_a\Vert{}_2 \Vert{}v_b\Vert{}_2}$. The system requests $N = k + 1$ candidates to drop the queried item (self-similarity of 1.0) and returns the top $k$ nearest neighbors.
+* **Sample Request**: `curl -X GET "[http://127.0.0.1:8000/similar/B0053BCML6?k=3](http://127.0.0.1:8000/similar/B0053BCML6?k=3)"`
+* **Sample Response**: `[{"product_id": "B000XJD33E", "score": 0.9473585486412048}, {"product_id": "B007AP8RJ4", "score": 0.9402635097503662}, {"product_id": "B001FVSOQ0", "score": 0.9363707304000854}]`
+
+## 4. Execution & Verification Workflow
+
+* **Step 1: Execute Offline Pipeline**: Run `python src/train.py` to generate `artifacts/als_model.npz`, `artifacts/user_item_matrix.npz`, and `artifacts/lookups.pkl`.
+* **Step 2: Start Web Service**: Run `python src/api/main.py` to launch the Uvicorn ASGI server locally on `[http://127.0.0.1:8000](http://127.0.0.1:8000)`.
+* **Step 3: Interactive Verification**: Navigate to `[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)` to test endpoints and validate payloads via the interactive Swagger UI interface.
+
