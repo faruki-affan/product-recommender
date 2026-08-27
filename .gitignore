@@ -20,3 +20,6 @@ artifacts/*
 # OS and logs
 .DS_Store
 *.log
+
+# Load-test output
+src/benchmarks/results/

@@ -258,3 +258,39 @@ This phase integrates an asynchronous Redis in-memory caching layer into the Fas
 * **Cache Keys**: Standardized naming conventions mapping user and item parameters directly to memory keys.
 * **Fail-Safe Operation**: Designed the caching layer to log connection warnings and seamlessly bypass Redis if the service is temporarily unavailable, maintaining high API availability.
 * **Invalidation Hook**: Automatically purges relevant cache patterns during ETL catalog updates to maintain data consistency.
+
+
+## Phase 9: Latency Benchmarking with Locust
+
+This phase adds a Locust load test against the live FastAPI service so throughput and tail latency can be measured under concurrent users, including the effect of Redis caching on repeated `/recommend` and `/similar` traffic.
+
+### What Was Built
+
+* **Locust User (`src/benchmarks/locustfile.py`)**: Defined `RecommenderUser` (`HttpUser`) with a 1–3 second `wait_time` and two `@task` methods: `GET /recommend/0?k=10` and `GET /similar/B0053BCML6?k=10`.
+* **Headless runners**: `src/benchmarks/run_benchmark.sh` and `src/benchmarks/run_benchmark.ps1` run Locust without the web UI, writing CSV stats and an HTML report that include Requests/s plus P50, P95, and P99 response times.
+
+### Execution
+
+Start the API first (`python src/api/main.py`), then from the repo root:
+
+```text
+powershell -File src/benchmarks/run_benchmark.ps1
+```
+
+```text
+bash src/benchmarks/run_benchmark.sh
+```
+
+Override load with `HOST`, `USERS` (default 20), `SPAWN_RATE` (default 5), and `RUN_TIME` (default `1m`). Direct Locust invocation:
+
+```text
+locust -f src/benchmarks/locustfile.py --headless --host http://127.0.0.1:8000 --users 20 --spawn-rate 5 --run-time 1m --csv src/benchmarks/results/locust --html src/benchmarks/results/report.html
+```
+
+After the run, `src/benchmarks/results/locust_stats.csv` has **Requests/s** (throughput) and **50% / 95% / 99%** columns (P50 / P95 / P99 latency in milliseconds). `report.html` is the same summary in a browser-readable report.
+
+### Key Components & Architecture
+
+* **Grouped request names**: Locust records `/recommend/{user_id}` and `/similar/{product_id}` so stats stay aggregated rather than exploding into one row per query string.
+* **Think time**: `between(1, 3)` seconds models a user pausing between API calls instead of saturating the server with a tight loop.
+* **Headless CSV export**: Locust’s `--csv` stats file is the source of truth for comparing cache-cold vs cache-warm latency under the same user count and duration.
