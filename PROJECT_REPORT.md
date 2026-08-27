@@ -294,3 +294,44 @@ Automated Coverage Reporting (pytest.ini & .coveragerc): Integrated pytest-cov t
 Reliable Execution: Achieved 27 passed tests running locally from the repository root in under a second.
 
 High Coverage: Maintained an overall 85% code coverage rating across the entire service package, with 100% coverage on core API modules and routing layers.
+
+# Phase 11: Containerization with Docker & Multi-Service Compose
+
+## Overview & Architecture
+Phase 11 introduces comprehensive containerization to package the entire end-to-end product recommendation system into standardized, isolated, and highly reproducible containers. By utilizing Docker and Docker Compose, we eliminate environment discrepancies ("it works on my machine") and coordinate multi-service architecture seamlessly.
+
+- **Backend Framework**: FastAPI
+- **Database**: PostgreSQL 16
+- **Cache**: Redis 7
+- **Orchestration**: Docker Compose
+
+---
+
+## Architecture Services Breakdown
+
+1. **API Service (`api`)**
+   - Built using an optimized Python 3.12 slim base image.
+   - Installs required scientific runtime libraries (`libgomp1`, `libpq5`).
+   - Installs pinned dependencies cleanly via UTF-8 encoded `requirements.txt`.
+   - Mounts local trained models (`artifacts/`) and launches Uvicorn on port `8080`.
+
+2. **Database Service (`db`)**
+   - Powered by PostgreSQL 16 Alpine.
+   - Configured with secure environment credentials and automated database bootstrapping (`recommender_db`).
+   - Utilizes persistent Docker volumes (`postgres_data`) for data durability across lifecycles.
+
+3. **Caching Service (`redis`)**
+   - Powered by Redis 7 Alpine mapped to port `6379`.
+   - Provides lightning-fast in-memory caching for recommendation queries.
+
+---
+
+## Project File Structure
+```text
+product-recommender/
+├── Dockerfile              # Production image recipe for FastAPI
+├── docker-compose.yml      # Multi-service composition & orchestration
+├── .dockerignore           # Excludes local caches, venvs, and logs
+├── requirements.txt        # UTF-8 encoded Python dependency manifest
+├── src/                    # FastAPI application source code
+└── artifacts/              # Trained machine learning model weights

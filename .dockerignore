@@ -1,0 +1,33 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python and test cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+
+# Local logs
+*.log
+logs/
+
+# Git and local secrets
+.git/
+.gitignore
+.env
+
+# Large local datasets (not required to serve the API)
+data/
+models/
+
+# Tests, experiments, and load-test output
+tests/
+experiments/
+src/benchmarks/results/
